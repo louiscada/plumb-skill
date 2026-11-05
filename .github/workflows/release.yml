@@ -1,7 +1,7 @@
 name: Release
 
-# When a release is published on GitHub, run the tests, build plumb.skill and
-# attach it to the release so people can install Plumb in one click.
+# When a release is published on GitHub, run the tests, build plumb.zip and
+# plumb.skill, and attach both so people can install Plumb without GitHub.
 on:
   release:
     types: [published]
@@ -19,9 +19,9 @@ jobs:
           python-version: "3.13"
       - name: Run tests
         run: python -m unittest discover -s tests -v
-      - name: Build plumb.skill
+      - name: Build plumb.zip and plumb.skill
         run: python tools/build_skill.py
       - name: Attach to the release
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/plumb.skill --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/plumb.zip dist/plumb.skill --clobber
         env:
           GH_TOKEN: ${{ github.token }}
