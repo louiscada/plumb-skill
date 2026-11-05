@@ -6,6 +6,35 @@ A plumb line shows what's truly level. Plumb does the same for your money: it ta
 
 ![Report preview](docs/report-preview.png)
 
+## Quick start
+
+**1. Download Plumb.** Click the green **Code** button → **Download ZIP** and unzip it, or run:
+
+```bash
+git clone https://github.com/louiscada/plumb-skill.git
+```
+
+**2. Install the `plumb` folder** (inside the download) as a skill:
+
+- **Claude app:** zip the `plumb` folder and upload it as a skill in Claude's settings.
+- **Claude Code:** copy it into your skills folder:
+
+  ```bash
+  cp -r plumb-skill/plumb ~/.claude/skills/
+  ```
+
+Linking the downloaded folder in a chat is not enough. Plumb has to be installed as a skill for Claude to use it.
+
+**3. Give it a home for your data.** In the Claude desktop app, link a folder such as `My Money` to your chat. Plumb keeps your numbers there in `plumb-data/ledger.json`, so it remembers you next time. In a chat with no folder, download `ledger.json` at the end and attach it next time.
+
+**4. Say hi.** Start with:
+
+> Rate my finances.
+
+Plumb asks a few short rounds of questions (rough numbers are fine), grades you A–F and hands you your report. After that, just say **"money check-in"** every payday or month-end.
+
+Plumb needs only Python 3, which Claude already has. There's nothing else to install.
+
 ## What it does
 
 - **A complete balance sheet**, set up once in about six short rounds:
@@ -22,17 +51,6 @@ A plumb line shows what's truly level. Plumb does the same for your money: it ta
 - **Quick check-ins** that only ask what changed since last time. Property and vehicle values carry forward; you refresh them about once a year.
 - **Fair to property owners.** A new appraisal of your land raises your net worth but not your grade, because the score tracks your underlying progress, not changes in estimates.
 - **Lightweight on tokens.** Instructions load in layers, the math runs in a script, and check-ins read a compact summary instead of your whole history.
-
-## Install
-
-Plumb is a standard skill folder: `SKILL.md` plus a few supporting files. It needs Python 3 (standard library only, nothing to install).
-
-1. Download this repository (green **Code** button → **Download ZIP**, or `git clone`).
-2. Use the `plumb` folder inside it:
-   - **Claude Code:** copy `plumb` into your skills directory (for example `~/.claude/skills/`).
-   - **Claude apps:** zip the `plumb` folder and upload it as a custom skill in your settings.
-
-Then just say something like *"rate my finances"* or *"money check-in"*.
 
 ## Staying on schedule
 
