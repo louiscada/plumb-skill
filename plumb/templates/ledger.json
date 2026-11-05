@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "_format": {
+    "assets_item": {
+      "name": "Emergency fund",
+      "type": "savings",
+      "liquid": true,
+      "rate": 4.0
+    },
+    "assets_item_property": {
+      "name": "Family lot",
+      "type": "land",
+      "liquid": false,
+      "share": 25,
+      "valuation": "estimate",
+      "valued_on": "2026-06"
+    },
+    "debts_item": {
+      "name": "Home loan",
+      "type": "mortgage",
+      "rate": 7.5,
+      "monthly_payment": 28000,
+      "secured_by": "Condo"
+    },
+    "receivables_item": {
+      "name": "Cousin",
+      "likelihood": "likely"
+    },
+    "goals_item": {
+      "name": "Japan trip",
+      "target": 80000,
+      "by": "2027-06",
+      "bucket": "Travel fund"
+    },
+    "asset_types": {
+      "Cash & deposits": [
+        "cash",
+        "savings",
+        "checking",
+        "time_deposit",
+        "e_wallet",
+        "money_market"
+      ],
+      "Investments": [
+        "brokerage",
+        "stocks",
+        "bonds",
+        "funds",
+        "crypto",
+        "precious_metals",
+        "investment_other"
+      ],
+      "Retirement & insurance": [
+        "retirement",
+        "pension",
+        "insurance_cash_value"
+      ],
+      "Real estate": [
+        "land",
+        "home",
+        "condo",
+        "rental_property",
+        "commercial_property",
+        "real_estate_other"
+      ],
+      "Vehicles": [
+        "car",
+        "motorcycle",
+        "boat",
+        "vehicle"
+      ],
+      "Business": [
+        "business"
+      ],
+      "Personal valuables": [
+        "jewelry",
+        "collectibles",
+        "equipment",
+        "valuables"
+      ],
+      "Other": [
+        "other"
+      ]
+    },
+    "debt_types": [
+      "credit_card",
+      "personal_loan",
+      "mortgage",
+      "car_loan",
+      "student_loan",
+      "bnpl",
+      "business_loan",
+      "family_friend",
+      "other"
+    ],
+    "valuation": [
+      "statement",
+      "market_quote",
+      "appraisal",
+      "estimate",
+      "purchase_price",
+      "tax_declaration"
+    ],
+    "note": "Names are user-chosen nicknames and must be unique within each list. Balances live in checkins, not here: for assets, record the FULL market value; 'share' (ownership %, default 100) scales it to the user's portion. 'valued_on' is YYYY-MM. 'secured_by' names the asset a loan is secured by. Never store account, card, ID or title/lot numbers."
+  },
+  "profile": {
+    "name": null,
+    "currency": "USD",
+    "age": null,
+    "income_type": null,
+    "monthly_income": null,
+    "monthly_spending": null,
+    "dependents": 0,
+    "lifestyle": null,
+    "top_spending": null,
+    "risk_tolerance": null,
+    "money_personality": null,
+    "checkin_frequency": "monthly"
+  },
+  "assets": [],
+  "debts": [],
+  "receivables": [],
+  "goals": [],
+  "checkins": []
+}
