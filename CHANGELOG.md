@@ -7,6 +7,10 @@ All notable changes to Plumb. Versions follow [semantic versioning](https://semv
 ### Added
 - Goals can track all liquid savings together (`"bucket": "liquid"`), which suits emergency and move-out funds.
 
+### Changed
+- Releases include `plumb.zip` for the Claude app's "Upload a skill" screen, next to `plumb.skill`.
+- Clearer install steps for non-technical users, including how to share Plumb with a friend.
+
 ### Fixed
 - What-if can add assets (`new_assets`), so a home or car purchase no longer shows the whole loan as a loss in net worth.
 

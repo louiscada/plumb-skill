@@ -11,11 +11,14 @@ A plumb line shows what's truly level. Plumb does the same for your money: it ta
 
 ## Quick start
 
-**1. Download `plumb.skill`** from the [latest release](https://github.com/louiscada/plumb-skill/releases/latest) (under **Assets**).
+**1. Download `plumb.zip`** from the [latest release](https://github.com/louiscada/plumb-skill/releases/latest) (under **Assets**). Don't unzip it.
 
 **2. Install it:**
 
-- **Claude app:** upload `plumb.skill` as a skill in Claude's settings. If you're chatting with Claude, you can also just drop the file into the chat and click **Save skill**.
+- **Claude app** (any plan, including Free):
+  1. Turn on **Code execution and file creation** in **Settings → Capabilities**. Plumb needs it to do its math.
+  2. Go to **Customize → Skills**, click **+**, choose **Create skill → Upload a skill**, and pick `plumb.zip`.
+  3. On a Team or Enterprise plan, your admin may need to allow skills first.
 - **Claude Code:** clone the repository and copy the `plumb` folder into your skills folder:
 
   ```bash
@@ -23,7 +26,9 @@ A plumb line shows what's truly level. Plumb does the same for your money: it ta
   cp -r plumb-skill/plumb ~/.claude/skills/
   ```
 
-Linking the downloaded folder in a chat is not enough. Plumb has to be installed as a skill for Claude to use it. New versions are listed on the [Releases](https://github.com/louiscada/plumb-skill/releases) page; install the newer `plumb.skill` the same way to update.
+Linking the downloaded folder in a chat is not enough. Plumb has to be installed as a skill for Claude to use it. New versions are listed on the [Releases](https://github.com/louiscada/plumb-skill/releases) page; upload the newer `plumb.zip` the same way to update.
+
+**Sharing Plumb with a friend?** Just send them `plumb.zip`. They don't need GitHub or any tech skills, only steps 2–4 here.
 
 **3. Give it a home for your data.** In the Claude desktop app, link a folder such as `My Money` to your chat. Plumb keeps your numbers there in `plumb-data/ledger.json`, so it remembers you next time. In a chat with no folder, download `ledger.json` at the end and attach it next time.
 
