@@ -1,0 +1,10 @@
+# Personal financial data — never commit
+plumb-data/
+ledger.json
+!plumb/templates/ledger.json
+report.html
+*.tmp
+
+__pycache__/
+*.pyc
+.DS_Store
