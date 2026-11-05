@@ -13,6 +13,7 @@ All notable changes to Plumb. Versions follow [semantic versioning](https://semv
 - Clearer install steps for non-technical users, including how to share Plumb with a friend.
 
 ### Fixed
+- Net worth chart labels no longer repeat (e.g. two "₱1.8M" ticks).
 - What-if can add assets (`new_assets`), so a home or car purchase no longer shows the whole loan as a loss in net worth.
 
 ## [1.0.0] — 2026-11-05

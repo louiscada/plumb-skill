@@ -1016,8 +1016,8 @@ def compact(v, cur):
     sym = SYMBOLS.get(cur, cur + " ")
     a = abs(v)
     sign = "−" if v < 0 else ""
-    if a >= 1e6:
-        return f"{sign}{sym}{a / 1e6:.1f}M"
+    if a >= 1e6:  # up to two decimals so nearby ticks stay distinct
+        return f"{sign}{sym}{f'{a / 1e6:.2f}'.rstrip('0').rstrip('.')}M"
     if a >= 1e3:
         return f"{sign}{sym}{a / 1e3:.0f}k"
     return f"{sign}{sym}{a:.0f}"
