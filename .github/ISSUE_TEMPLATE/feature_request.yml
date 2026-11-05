@@ -1,0 +1,22 @@
+name: Idea or feature request
+description: Something that would make Plumb more useful
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem or situation?
+      description: e.g. "I get paid weekly, and check-ins assume biweekly or monthly."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: Please don't include real financial data.
