@@ -1,0 +1,45 @@
+name: Bug report
+description: Something Plumb did wrong, or a grade that looks off
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Please don't include real financial data.** Use made-up numbers and nicknames.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you asked or typed, and what Plumb did.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where were you using Plumb?
+      options:
+        - Claude app (desktop)
+        - Claude app (web)
+        - Claude app (mobile)
+        - Claude Code
+        - Ran the script directly
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plumb version
+      description: Shown in your report footer (e.g. v1.0.0), or run `python plumb/scripts/plumb.py --version`.
+  - type: textarea
+    id: details
+    attributes:
+      label: Anything else?
+      description: Error messages, or a ledger snippet with **made-up** numbers.
+      render: text
