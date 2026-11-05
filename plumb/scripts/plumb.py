@@ -17,7 +17,7 @@ from datetime import date, datetime
 
 # ---------------------------------------------------------------- settings ---
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 # Branding: rename the tool here and the report follows.
 BRAND_NAME = "Plumb"
@@ -365,6 +365,11 @@ def goal_timeline(g, history, series, today, income, spend):
         basis = "recent check-ins"
         if pace is None and income and spend is not None:
             pace, basis = income - spend, "monthly savings"
+    elif g["bucket"] == "liquid":
+        pace = recent_pace([(h["date"], h["liquid"]) for h in history])
+        basis = "recent check-ins"
+        if pace is None and income and spend is not None:
+            pace, basis = income - spend, "monthly savings"
     else:
         pace = recent_pace([(h["date"], s_.get(g["bucket"]))
                             for h, s_ in zip(history, series)])
@@ -491,6 +496,7 @@ def score(led, scenario=None):
         bi = balances_through(led, i)
         ti, ci = totals(led, bi), counted_assets(led, bi)
         entry = {"date": c["date"], "net_worth": round(ti["net_worth"], 2),
+                 "liquid": round(ti["liquid"], 2),
                  "change": None, "revaluation": None, "underlying": None}
         if prev:
             pnw, pci, pbi = prev
@@ -598,13 +604,16 @@ def score(led, scenario=None):
     total = round(total)
     grade = next(g for cut, g in GRADES if total >= cut)
 
-    # Goals track one account ("bucket": its nickname) or the whole net worth
-    # ("bucket": "net_worth"). A goal may have no target yet.
+    # Goals track one account ("bucket": its nickname), all liquid savings
+    # ("bucket": "liquid") or the whole net worth ("bucket": "net_worth").
+    # A goal may have no target yet.
     goals = []
     for g in led["goals"]:
         b = g.get("bucket")
         if b == "net_worth":
             cur_amt = t["net_worth"]
+        elif b == "liquid":
+            cur_amt = t["liquid"]
         elif b:
             cur_amt = counted.get(b)
         else:
@@ -855,6 +864,16 @@ def cmd_whatif(a):
         alt["assets"].append({"name": "What-if cash change", "type": "cash",
                               "liquid": True})
         bals.setdefault("assets", {})["What-if cash change"] = cash
+    anames = {x["name"] for x in alt["assets"]}
+    for i, x in enumerate(sc.get("new_assets") or [], 1):
+        name = x.get("name") or f"What-if asset {i}"
+        while name in anames:
+            name += " (what-if)"
+        anames.add(name)
+        alt["assets"].append({"name": name, "type": x.get("type", "other"),
+                              "liquid": bool(x.get("liquid", False))})
+        bals.setdefault("assets", {})[name] = num(x.get("balance", 0),
+                                                  f"balance of {name}")
     names = {d["name"] for d in alt["debts"]}
     for i, d in enumerate(sc.get("new_debts") or [], 1):
         name = d.get("name") or f"What-if debt {i}"
@@ -1321,8 +1340,8 @@ def render(led, s, message, steps):
             prog = (f'<div class="mini"><span style="width:{g["pct"]}%;'
                     f'background:var(--brand)"></span></div> {g["pct"]}%')
         saved = "—" if g["current"] is None else m(g["current"]) + (
-            "<br><small>net worth</small>" if g["bucket"] == "net_worth"
-            else "")
+            {"net_worth": "<br><small>net worth</small>",
+             "liquid": "<br><small>liquid savings</small>"}.get(g["bucket"], ""))
         target = (m(g["target"]) if g["target"] else "Not set") + (
             f'<br><small>by {esc(g["by"])}</small>' if g["by"] else "")
         if g["pace"] is None:
@@ -1613,8 +1632,10 @@ def main(argv=None):
                                       "change, without saving anything")
     p.add_argument("--json", required=True,
                    help='{"spending_change": 18000, "income_change": 0, '
-                        '"cash_change": -60000, "new_debts": [{"name": ..., '
-                        '"balance": ..., "monthly_payment": ..., "rate": ...}]}')
+                        '"cash_change": -60000, "new_assets": [{"name": ..., '
+                        '"type": ..., "balance": ...}], "new_debts": '
+                        '[{"name": ..., "balance": ..., "monthly_payment": ..., '
+                        '"rate": ...}]}')
     p.add_argument("--as-json", action="store_true",
                    help="also print the comparison as JSON")
     sub.add_parser("backups", help="list automatic ledger backups")

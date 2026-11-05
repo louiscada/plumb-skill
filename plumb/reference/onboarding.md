@@ -78,7 +78,7 @@ Only for what they ticked in Round 3.
 4. How often should we check in? — Biweekly · Monthly (single-select)
 
 **Then in text:**
-- For each goal they picked: a target amount and date, **if they know them**. A goal without a target is fine (the report shows "Set a target"). Track a goal against the account its money lives in (`"bucket": "<nickname>"`), or the whole net worth for net-worth goals (`"bucket": "net_worth"`).
+- For each goal they picked: a target amount and date, **if they know them**. A goal without a target is fine (the report shows "Set a target"). Track a goal against the account its money lives in (`"bucket": "<nickname>"`), all liquid savings together for emergency or move-out funds (`"bucket": "liquid"`), or the whole net worth for net-worth goals (`"bucket": "net_worth"`).
 - For each person who owes them money: a nickname (no full names needed), the amount, and a **card** for how likely it is to come back: Likely · Unsure · Unlikely.
 
 ## Then

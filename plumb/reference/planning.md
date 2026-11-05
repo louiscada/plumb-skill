@@ -21,6 +21,8 @@ When a goal has no target, offer to work one out together. Ask for the local nor
 - **Emergency fund:** 6 × monthly spending (3 can be enough with very stable income; more for freelancers or single-income households with dependents).
 - **A net-worth number** ("be a millionaire"): the target is the number; track it with `"bucket": "net_worth"`.
 
+**What a goal tracks:** one account (`"bucket": "<nickname>"`), all liquid savings together (`"bucket": "liquid"` — right for emergency funds and move-out funds, which are cushion plus upfront costs), or the whole net worth (`"bucket": "net_worth"`). Money for a trip or a down payment is easiest to track in its own account.
+
 Write the agreed target into the goal in `ledger.json` (`"target"`, and `"by"` if they have a date), then rerun `summary` to show the new timeline.
 
 ## What-if
@@ -32,6 +34,7 @@ python scripts/plumb.py whatif --json '{
   "spending_change": 18000,
   "income_change": 0,
   "cash_change": -60000,
+  "new_assets": [{"name": "Car", "type": "car", "balance": 600000}],
   "new_debts": [{"name": "Car loan", "balance": 500000, "monthly_payment": 12000, "rate": 9}]
 }'
 ```
@@ -41,11 +44,13 @@ python scripts/plumb.py whatif --json '{
 | `spending_change` | Change to monthly spending (rent, new bills; negative if something stops) |
 | `income_change` | Change to monthly take-home pay (a raise, a job change; negative for a pay cut) |
 | `cash_change` | One-time change to liquid savings (move-in costs, a down payment, a bonus) |
+| `new_assets` | Things the change would add: a home, a car (type and value) |
 | `new_debts` | Loans the change would add: balance, monthly payment, annual rate |
 
 Common shapes:
 - **Moving out:** `spending_change` = rent + utilities + extra food − anything they stop paying at home; `cash_change` = −(deposit + advance + moving + furnishing).
-- **Buying a car:** `new_debts` for the loan, `cash_change` for the down payment, `spending_change` for fuel, parking and insurance.
+- **Buying a home or car:** `new_assets` for what they'd own, `new_debts` for the loan, `cash_change` for the down payment (and closing costs), and `spending_change` for the monthly payment plus dues, fuel or insurance. Without `new_assets`, net worth would wrongly drop by the whole loan.
+- **Rent check:** if new rent plus bills pushes spending above income, say so plainly and run a cheaper-rent what-if next to it.
 - **New job or raise:** `income_change`.
 
 Share the before → after table in chat in the buddy voice, and say what drives the change ("the cushion drops from 6.8 to 2.6 months, which is most of the grade change"). Then suggest what would make the plan safer (a bigger cushion first, a cheaper rent, a later date). It's their decision; never tell them not to do it.

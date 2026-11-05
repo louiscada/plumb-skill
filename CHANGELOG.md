@@ -2,6 +2,14 @@
 
 All notable changes to Plumb. Versions follow [semantic versioning](https://semver.org): a change that moves anyone's grade is at least a minor version.
 
+## [1.0.1] — 2026-11-05
+
+### Added
+- Goals can track all liquid savings together (`"bucket": "liquid"`), which suits emergency and move-out funds.
+
+### Fixed
+- What-if can add assets (`new_assets`), so a home or car purchase no longer shows the whole loan as a loss in net worth.
+
 ## [1.0.0] — 2026-11-05
 
 First versioned release.

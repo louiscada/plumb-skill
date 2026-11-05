@@ -256,6 +256,36 @@ class TestGoalsAndWhatIf(LedgerCase):
         self.assertEqual(before, json.dumps(self.ledger(), sort_keys=True))
 
 
+    def test_liquid_savings_goal(self):
+        led = self.ledger()
+        led["goals"].append({"name": "Move-out fund", "target": 200000,
+                             "bucket": "liquid"})
+        self.write(goals=led["goals"])
+        g = {x["name"]: x for x in self.score()["goals"]}["Move-out fund"]
+        self.assertAlmostEqual(g["current"], 160000)
+        self.assertEqual(g["pct"], 80)
+        self.assertEqual(g["eta"], plumb.add_months("2026-11-05", 2))
+
+    def test_whatif_purchase_adds_the_asset_with_the_loan(self):
+        code, out, err = run(self.data, "whatif", "--as-json", "--json",
+                             json.dumps({
+                                 "cash_change": -100000,
+                                 "new_assets": [{"name": "Condo", "type": "condo",
+                                                 "balance": 1000000}],
+                                 "new_debts": [{"name": "Loan", "balance": 900000,
+                                                "monthly_payment": 8000,
+                                                "rate": 7}]}))
+        self.assertEqual(code, 0, err)
+        now = self.score()["net_worth"]
+        s = plumb.score(plumb.load(self.data))  # ledger unchanged
+        self.assertEqual(s["net_worth"], now)
+        self.assertIn("Net worth", out)
+        # 1,000,000 asset − 900,000 loan − 100,000 cash = no net change
+        line = [l for l in out.splitlines() if l.startswith("Net worth")][0]
+        before, after = [x.strip() for x in line[len("Net worth"):].split("→")]
+        self.assertEqual(before, after)
+
+
 class TestReport(LedgerCase):
 
     def test_report_renders_and_escapes_user_text(self):
