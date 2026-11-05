@@ -1,5 +1,8 @@
 # Plumb
 
+[![Tests](https://github.com/louiscada/plumb-skill/actions/workflows/tests.yml/badge.svg)](https://github.com/louiscada/plumb-skill/actions/workflows/tests.yml)
+[![Latest release](https://img.shields.io/github/v/release/louiscada/plumb-skill)](https://github.com/louiscada/plumb-skill/releases/latest)
+
 A free Claude skill that gives your finances an honest check-up and a professional financial health report.
 
 A plumb line shows what's truly level. Plumb does the same for your money: it takes one snapshot of your whole financial picture, grades it **A–F**, and gives you two or three concrete next steps, then runs a quick monthly or biweekly check-in and tracks your net worth over time. In chat it talks like a warm friend who happens to be good with money; on paper it hands you a report with your name on it.
@@ -8,22 +11,19 @@ A plumb line shows what's truly level. Plumb does the same for your money: it ta
 
 ## Quick start
 
-**1. Download Plumb.** Click the green **Code** button → **Download ZIP** and unzip it, or run:
+**1. Download `plumb.skill`** from the [latest release](https://github.com/louiscada/plumb-skill/releases/latest) (under **Assets**).
 
-```bash
-git clone https://github.com/louiscada/plumb-skill.git
-```
+**2. Install it:**
 
-**2. Install the `plumb` folder** (inside the download) as a skill:
-
-- **Claude app:** zip the `plumb` folder and upload it as a skill in Claude's settings.
-- **Claude Code:** copy it into your skills folder:
+- **Claude app:** upload `plumb.skill` as a skill in Claude's settings. If you're chatting with Claude, you can also just drop the file into the chat and click **Save skill**.
+- **Claude Code:** clone the repository and copy the `plumb` folder into your skills folder:
 
   ```bash
+  git clone https://github.com/louiscada/plumb-skill.git
   cp -r plumb-skill/plumb ~/.claude/skills/
   ```
 
-Linking the downloaded folder in a chat is not enough. Plumb has to be installed as a skill for Claude to use it.
+Linking the downloaded folder in a chat is not enough. Plumb has to be installed as a skill for Claude to use it. New versions are listed on the [Releases](https://github.com/louiscada/plumb-skill/releases) page; install the newer `plumb.skill` the same way to update.
 
 **3. Give it a home for your data.** In the Claude desktop app, link a folder such as `My Money` to your chat. Plumb keeps your numbers there in `plumb-data/ledger.json`, so it remembers you next time. In a chat with no folder, download `ledger.json` at the end and attach it next time.
 
@@ -46,10 +46,15 @@ Plumb needs only Python 3, which Claude already has. There's nothing else to ins
   - **Debts** of every kind, linked to the property they're secured by so you see your equity
   - **Money people owe you**, weighted by how likely it is to come back
   - Plus income, spending, lifestyle, risk tolerance, money personality and goals. Rough numbers are fine.
+- **Little typing.** Choose quick (totals only), detailed, or screenshots of your bank or budget app. Questions with set answers come as tap-to-answer cards where your Claude app supports them, and a checklist up front means Plumb only asks about what you actually have.
 - **An A–F grade** built from four parts: emergency cushion, debt health, savings rate and momentum. The grade is calculated by a script, so it's consistent and transparent, never vibes.
 - **A professional report with your name on it** ("Juan's Financial Health Report") as a single HTML file, laid out like a bureau-style document: grade scale, summary of financial position, score components, observations, net worth history, asset allocation, assets grouped by class, property equity, liabilities, receivables, goals and recommended actions. It works offline and prints cleanly to PDF from any browser.
 - **Quick check-ins** that only ask what changed since last time. Property and vehicle values carry forward; you refresh them about once a year.
-- **Fair to property owners.** A new appraisal of your land raises your net worth but not your grade, because the score tracks your underlying progress, not changes in estimates.
+- **Goal timelines.** Every goal shows your monthly pace and an estimated date ("₱1M around October 2029"), plus how much a deadline needs per month. Plumb can help you set targets you're unsure of, like a move-out fund.
+- **What-if.** "What happens to my grade if I move out and pay ₱18k rent?" See the new cushion, savings rate and grade before you decide.
+- **Income and spending chart** in the report, so spending creep is visible at a glance.
+- **Fair to property owners and global investors.** A new appraisal of your land, or the peso moving against your US ETFs, changes your net worth but not your grade. The score tracks your underlying progress, not changes in estimates or exchange rates. Foreign holdings stay in their own currency.
+- **Safe with your data.** A typo guard asks before recording a balance that jumps suspiciously, and the last 10 versions of your ledger are backed up automatically.
 - **Lightweight on tokens.** Instructions load in layers, the math runs in a script, and check-ins read a compact summary instead of your whole history.
 
 ## Staying on schedule
@@ -71,7 +76,7 @@ A skill can't wake itself up, so set a recurring reminder for payday or the end 
 | Emergency cushion (liquid savings ÷ monthly spending) | 30% | 6+ months |
 | Debt health (payments ÷ income; penalty for 10%+ interest debt) | 30% | No debt, or low payments with nothing high-interest |
 | Savings rate ((income − spending) ÷ income) | 25% | 30%+ |
-| Momentum (net worth change excluding property revaluations, from the 2nd check-in) | 15% | Growing by half a month's spending per month |
+| Momentum (net worth change excluding revaluations and exchange-rate moves, from the 2nd check-in) | 15% | Growing by half a month's spending per month |
 
 **A** ≥ 85 · **B** ≥ 70 · **C** ≥ 55 · **D** ≥ 40 · **F** < 40. Details are in [`plumb/reference/rubric.md`](plumb/reference/rubric.md). The curves and thresholds sit at the top of [`plumb/scripts/plumb.py`](plumb/scripts/plumb.py) if you want to tune them.
 
@@ -83,8 +88,11 @@ You can run the script without Claude:
 python plumb/scripts/plumb.py init                 # create an empty ledger
 python plumb/scripts/plumb.py checkin --json '{...}'
 python plumb/scripts/plumb.py summary              # compact text
-python plumb/scripts/plumb.py score                # grade + flags as JSON
+python plumb/scripts/plumb.py score                # grade, flags and goal timelines as JSON
+python plumb/scripts/plumb.py whatif --json '{"spending_change": 18000}'   # compare a change
 python plumb/scripts/plumb.py report --step "Pay extra on the card"   # HTML report
+python plumb/scripts/plumb.py backups              # list automatic backups
+python plumb/scripts/plumb.py restore --file <name>
 ```
 
 ## Not financial advice
@@ -93,7 +101,7 @@ Plumb is an educational check-up tool. It is not a licensed financial advisor an
 
 ## Contributing
 
-Ideas and bug reports are welcome as issues. Pull requests are reviewed by the maintainer, and only approved changes are merged into the official Plumb.
+Ideas and bug reports are welcome as [issues](https://github.com/louiscada/plumb-skill/issues/new/choose). Pull requests are reviewed by the maintainer, and only approved changes are merged into the official Plumb. Every change runs the automated tests, so a contribution can't silently change anyone's grade. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
 ## License
 

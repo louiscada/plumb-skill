@@ -25,11 +25,23 @@ Script (stdlib Python, no installs): `scripts/plumb.py` in this skill's folder. 
 |---|---|
 | `init` | Create an empty ledger from the template |
 | `summary` | Compact text of the latest state — read this instead of the whole ledger |
-| `checkin --json '<json>'` | Append a check-in (format in `reference/checkin.md`) |
-| `score` | Net worth, component scores, A–F grade and flags as JSON |
-| `report --out <file.html> --message "<text>" --step "<text>" [--step ...]` | Build the HTML report card |
+| `checkin --json '<json>' [--confirm]` | Append a check-in (format in `reference/checkin.md`). Stops with "Check before saving" when a balance jumps suspiciously; `--confirm` records it anyway |
+| `score` | Net worth, component scores, A–F grade, flags and goal timelines as JSON |
+| `whatif --json '<json>'` | Compare today with a hypothetical change, without saving (see `reference/planning.md`) |
+| `report --out <file.html> --message "<text>" --step "<text>" [--step ...]` | Build the HTML report |
+| `backups` / `restore --file <name>` | List or restore automatic ledger backups (one is made before every change) |
 
 If the platform can't keep files between conversations (e.g. a plain web chat), tell the user at the end of each session to download `ledger.json` and attach it next time.
+
+## How to ask
+
+Answering questions is the main cost for the user, so make each one as easy as possible.
+
+- **Use question cards when you have them.** If a structured-question tool is available (for example `AskUserQuestion`: up to 4 questions per card, 2–4 options each, single- or multi-select, with a free-text "Other"), ask every question that has a fixed set of answers that way. Put the most likely answer first.
+- **Amounts are typed.** Balances, income and spending go in a plain reply (or a card's "Other" field). Never offer money ranges as options: the difference between 3 and 6 months of savings is the whole emergency score, so a range is too rough to grade honestly.
+- **Pair a card with a short text question** when a round needs both choices and amounts: send the card, then ask for the amounts.
+- **No card tool?** Ask the same questions as a short numbered list in text, one round per message.
+- **Screenshots are welcome.** Users can send screenshots from their bank or budget app instead of typing balances. Read the figures off them and remind them to hide account numbers, card numbers and full names first.
 
 ## Which flow to run
 
@@ -38,6 +50,8 @@ If the platform can't keep files between conversations (e.g. a plain web chat), 
 3. **Ledger exists** → check-in. Run `summary`, then read `reference/checkin.md` and follow it.
 4. **User only wants to see where they stand** → run `score` and `report`, no new questions.
 5. **User asks why they got their grade** → read `reference/rubric.md` and explain in plain words.
+6. **User asks what a goal should be, when they'll reach it, or "what if…"** → read `reference/planning.md`.
+7. **Something in the ledger looks wrong or lost** → run `backups`, show the user the list, and `restore` the version they pick.
 
 ## Every report
 
@@ -46,7 +60,7 @@ After onboarding or a check-in:
 1. Run `score`.
 2. Write a 2–4 sentence `--message`: the overall assessment, the biggest strength and the biggest concern, with figures. The report is a formal, bureau-style document, so write this part in a clear, neutral, professional tone. Save the warm buddy voice for the chat.
 3. Write 2–3 `--step`s as short imperative actions: concrete, doable before the next check-in, tied to the flags in the score output. Steps describe behaviors and account *types* ("Move 3 months of expenses into a separate high-yield savings account"), never specific products.
-4. Run `report`, share the HTML file with the user, and give a 3–5 line summary in chat in the buddy voice. Don't paste the whole report or the ledger into the chat. The report prints cleanly to PDF from any browser if the user wants one.
+4. Run `report`, share the HTML file with the user, and give a 3–5 line summary in chat in the buddy voice. When a goal has an estimated date, mention it ("at this pace, ₱1M around October 2029"), and offer to set targets for goals that have none. Don't paste the whole report or the ledger into the chat. The report prints cleanly to PDF from any browser if the user wants one.
 
 ## Lines you don't cross
 

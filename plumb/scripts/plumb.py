@@ -6,6 +6,7 @@ Run `python plumb.py -h` for commands.
 """
 import argparse
 import base64
+import copy
 import html
 import json
 import os
@@ -15,6 +16,8 @@ import sys
 from datetime import date, datetime
 
 # ---------------------------------------------------------------- settings ---
+
+VERSION = "1.0.0"
 
 # Branding: rename the tool here and the report follows.
 BRAND_NAME = "Plumb"
@@ -26,6 +29,11 @@ REPORT_PREFIX = "PL"  # report numbers look like PL-20261130-003
 # it looks the same offline and in print.
 DISPLAY_FONT = "FrancoisOne-Regular.subset.woff2"
 
+BACKUPS_KEPT = 10  # previous ledger versions kept in <data>/backups/
+# Typo guard: a balance that moves by this fraction AND by more than this share
+# of a month's spending needs --confirm before it is recorded.
+TYPO_RELATIVE = 0.5
+TYPO_SPENDING_SHARE = 0.25
 HIGH_RATE = 10.0  # annual % at or above which a debt counts as high-interest
 WEIGHTS = {"emergency": 0.30, "debt": 0.30, "savings": 0.25, "momentum": 0.15}
 LABELS = {
@@ -65,6 +73,9 @@ ASSET_CLASSES = [  # (class, asset types), in report order
 NON_FINANCIAL = {"Real estate", "Vehicles", "Business", "Personal valuables",
                  "Other"}
 STALE_MONTHS = 18  # flag non-financial values not updated in this long
+# Classes whose value is an estimate worth re-checking now and then.
+VALUED_BY_ESTIMATE = {"Real estate", "Vehicles", "Business",
+                      "Personal valuables"}
 # 10+ digits in a row (spaces/dashes allowed between) looks like an account,
 # card or ID number. Dates have 8 digits, so they pass.
 LONG_NUMBER = re.compile(r"(?:\d[ -]?){10,}")
@@ -79,6 +90,10 @@ CURVE_MOMENTUM = [(-0.5, 0), (0, 50), (0.5, 100)]                # months/month
 
 class MoneyError(Exception):
     pass
+
+
+class NeedsConfirm(MoneyError):
+    """A check-in looks suspicious; re-run with --confirm if it's correct."""
 
 
 # ----------------------------------------------------------------- helpers ---
@@ -99,11 +114,14 @@ def parse_date(s):
         raise MoneyError(f"Bad date {s!r}; use YYYY-MM-DD.")
 
 
-def money(x, cur):
+def money(x, cur, exact=False):
     sym = SYMBOLS.get(cur, cur + " ")
     sign = "−" if x < 0 else ""
     x = abs(x)
-    body = f"{x:,.0f}" if x >= 100 or x == int(x) else f"{x:,.2f}"
+    if exact:
+        body = f"{x:,.2f}"
+    else:
+        body = f"{x:,.0f}" if x >= 100 or x == int(x) else f"{x:,.2f}"
     return f"{sign}{sym}{body}"
 
 
@@ -159,8 +177,32 @@ def load(data_dir):
     return led
 
 
+def backup_dir(data_dir):
+    return os.path.join(data_dir, "backups")
+
+
+def backup(data_dir):
+    """Copy the current ledger into backups/, keeping the newest few."""
+    src = ledger_path(data_dir)
+    if not os.path.exists(src):
+        return None
+    bdir = backup_dir(data_dir)
+    os.makedirs(bdir, exist_ok=True)
+    name = f"ledger-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.json"
+    shutil.copyfile(src, os.path.join(bdir, name))
+    kept = sorted(f for f in os.listdir(bdir)
+                  if f.startswith("ledger-") and f.endswith(".json"))
+    for old in kept[:-BACKUPS_KEPT]:
+        try:
+            os.remove(os.path.join(bdir, old))
+        except OSError:
+            pass  # some synced or sandboxed folders don't allow deleting
+    return name
+
+
 def save(data_dir, led):
     p = ledger_path(data_dir)
+    backup(data_dir)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(led, f, indent=2, ensure_ascii=False)
@@ -171,9 +213,11 @@ def save(data_dir, led):
 def balances_through(led, idx):
     """Balances as of check-in idx, carrying forward unreported buckets."""
     bal = {s: {} for s in SECTIONS}
+    bal["fx"] = {}
     for c in led["checkins"][: idx + 1]:
         for s in SECTIONS:
             bal[s].update(c.get("balances", {}).get(s, {}))
+        bal["fx"].update(c.get("fx", {}))
     return bal
 
 
@@ -213,10 +257,37 @@ def share_of(asset):
     return 1.0 if s is None else max(0.0, min(float(s), 100.0)) / 100
 
 
+def home_currency(led):
+    return (led["profile"].get("currency") or "USD").upper()
+
+
+def asset_currency(led, asset):
+    return (asset.get("currency") or home_currency(led)).upper()
+
+
+def asset_rate(led, bal, asset):
+    """Home-currency value of 1 unit of the asset's currency."""
+    ccy, home = asset_currency(led, asset), home_currency(led)
+    if ccy == home:
+        return 1.0
+    rate = bal.get("fx", {}).get(ccy)
+    if not rate:
+        raise MoneyError(
+            f"No exchange rate for {ccy} ({asset.get('name')}). Add "
+            f'"fx": {{"{ccy}": <{home} per 1 {ccy}>}} to the check-in.')
+    return float(rate)
+
+
 def counted_assets(led, bal):
-    """{name: value of the user's share} — balances hold full market value."""
+    """{name: home-currency value of the user's share}.
+
+    Balances hold the full market value in the asset's own currency."""
     amap = {a["name"]: a for a in led["assets"]}
-    return {k: v * share_of(amap.get(k, {})) for k, v in bal["assets"].items()}
+    out = {}
+    for k, v in bal["assets"].items():
+        a = amap.get(k, {"name": k})
+        out[k] = v * share_of(a) * asset_rate(led, bal, a)
+    return out
 
 
 def totals(led, bal):
@@ -236,6 +307,12 @@ def totals(led, bal):
             "net_worth": assets + recv - debts}
 
 
+def add_months(day, n):
+    """'YYYY-MM[-DD]' plus n months, as 'YYYY-MM'."""
+    m0 = int(day[:4]) * 12 + int(day[5:7]) - 1 + n
+    return f"{m0 // 12:04d}-{m0 % 12 + 1:02d}"
+
+
 def months_between(earlier, later):
     """Whole months between two 'YYYY-MM[-DD]' strings, or None."""
     try:
@@ -248,6 +325,70 @@ def months_between(earlier, later):
 
 # ----------------------------------------------------------------- scoring ---
 
+def recent_pace(points):
+    """Monthly change over the last (up to) three periods of (date, value)."""
+    pts = [p for p in points if p[1] is not None][-4:]
+    if len(pts) < 2:
+        return None
+    days = (parse_date(pts[-1][0]) - parse_date(pts[0][0])).days
+    if days < 7:
+        return None
+    return (pts[-1][1] - pts[0][1]) * 30 / days
+
+
+def goal_timeline(g, history, series, today, income, spend):
+    """Pace, estimated arrival and the monthly amount a deadline needs.
+
+    Net-worth goals use the underlying net worth change (revaluations and FX
+    excluded); before a second check-in they fall back to monthly savings.
+    Account goals use that account's recent change. No investment growth is
+    assumed."""
+    out = {"pace": None, "pace_basis": None, "eta": None,
+           "needed_per_month": None, "on_track": None, "status": None}
+    target, cur = g["target"], g["current"]
+    if not target:
+        out["status"] = "no_target"
+        return out
+    if cur is None:
+        out["status"] = "not_linked"
+        return out
+    remaining = target - cur
+    if remaining <= 0:
+        out["status"] = "reached"
+        return out
+    if g["bucket"] == "net_worth":
+        under, nw = [], 0.0
+        for h in history:  # cumulative underlying net worth
+            nw = h["net_worth"] if h["underlying"] is None else nw + h["underlying"]
+            under.append((h["date"], nw))
+        pace = recent_pace(under)
+        basis = "recent check-ins"
+        if pace is None and income and spend is not None:
+            pace, basis = income - spend, "monthly savings"
+    else:
+        pace = recent_pace([(h["date"], s_.get(g["bucket"]))
+                            for h, s_ in zip(history, series)])
+        basis = "recent check-ins"
+    if pace is not None:
+        out["pace"], out["pace_basis"] = round(pace, 2), basis
+    if pace and pace > 0:
+        months = -(-remaining // pace)  # ceiling
+        out["eta"] = add_months(today, int(months)) if months <= 1200 else None
+        out["status"] = "on_pace" if months <= 1200 else "too_slow"
+    else:
+        out["status"] = "no_pace"
+    if g["by"]:
+        by = g["by"] if len(g["by"]) >= 7 else f"{g['by'][:4]}-12"
+        left = months_between(today, by)
+        if left is not None:
+            out["needed_per_month"] = round(remaining / max(left, 1), 2)
+            if out["eta"]:
+                out["on_track"] = out["eta"] <= by[:7]
+            elif pace is not None:
+                out["on_track"] = False
+    return out
+
+
 def allocation(led, counted, total):
     amap = {a["name"]: a for a in led["assets"]}
     by = {}
@@ -259,7 +400,12 @@ def allocation(led, counted, total):
             for c, _ in ASSET_CLASSES if by.get(c)]
 
 
-def score(led):
+def score(led, scenario=None):
+    """Grade the latest check-in.
+
+    scenario (what-if): {"spending_delta", "income_delta"} added to the
+    monthly figures; Momentum is left out so the comparison is like for like.
+    """
     if not led["checkins"]:
         raise MoneyError("No check-ins yet. Record the onboarding snapshot "
                          "with `checkin` first.")
@@ -271,6 +417,9 @@ def score(led):
     spend = recent_monthly(led, "spending", prof.get("monthly_spending"))
     income = recent_monthly(led, "income", prof.get("monthly_income"))
     latest = led["checkins"][last]
+    if scenario is not None:
+        spend = (spend or 0) + (scenario.get("spending_delta") or 0)
+        income = (income or 0) + (scenario.get("income_delta") or 0)
 
     comps, flags, metrics = {}, [], {}
 
@@ -292,7 +441,7 @@ def score(led):
 
     # Savings rate (ratio of the latest period, else recent averages)
     inc_l, sp_l = latest.get("income"), latest.get("spending")
-    if inc_l is None or sp_l is None:
+    if inc_l is None or sp_l is None or scenario is not None:
         inc_l, sp_l = income, spend
     if inc_l and inc_l > 0 and sp_l is not None:
         rate = (inc_l - sp_l) / inc_l
@@ -335,24 +484,39 @@ def score(led):
     # Momentum (needs two check-ins). Scored on the *underlying* change:
     # the net worth change minus revaluations of non-financial assets held at
     # both check-ins. Buying or selling one is a swap, not a revaluation.
-    history, prev = [], None
+    # Exchange-rate moves on foreign holdings are treated the same way.
+    amap_ = {a["name"]: a for a in led["assets"]}
+    history, series, prev = [], [], None
     for i, c in enumerate(led["checkins"]):
         bi = balances_through(led, i)
         ti, ci = totals(led, bi), counted_assets(led, bi)
         entry = {"date": c["date"], "net_worth": round(ti["net_worth"], 2),
                  "change": None, "revaluation": None, "underlying": None}
         if prev:
-            amap_ = {a["name"]: a for a in led["assets"]}
+            pnw, pci, pbi = prev
             reval = sum(
-                ci[k] - prev[1][k] for k in ci
-                if prev[1].get(k, 0) > 0 and ci[k] > 0
+                ci[k] - pci[k] for k in ci
+                if pci.get(k, 0) > 0 and ci[k] > 0
                 and asset_class(amap_.get(k, {}).get("type")) in NON_FINANCIAL)
-            chg = ti["net_worth"] - prev[0]
-            entry.update(change=round(chg, 2), revaluation=round(reval, 2),
-                         underlying=round(chg - reval, 2))
+            fx_effect = 0.0
+            for k, v in bi["assets"].items():
+                a = amap_.get(k, {"name": k})
+                pv = pbi["assets"].get(k, 0)
+                if (asset_currency(led, a) != home_currency(led) and pv > 0
+                        and v > 0
+                        and asset_class(a.get("type")) not in NON_FINANCIAL):
+                    fx_effect += pv * share_of(a) * (
+                        asset_rate(led, bi, a) - asset_rate(led, pbi, a))
+            chg = ti["net_worth"] - pnw
+            entry.update(change=round(chg, 2),
+                         revaluation=round(reval + fx_effect, 2),
+                         underlying=round(chg - reval - fx_effect, 2))
         history.append(entry)
-        prev = (ti["net_worth"], ci)
-    if len(history) >= 2 and spend and spend > 0:
+        series.append(ci)
+        prev = (ti["net_worth"], ci, bi)
+    if scenario is not None:
+        pass  # what-if compares like for like, without Momentum
+    elif len(history) >= 2 and spend and spend > 0:
         change = history[-1]["underlying"]
         per_month = change * 30 / period_days(led, last)
         metrics["net_worth_change"] = history[-1]["change"]
@@ -407,7 +571,7 @@ def score(led):
                           f"the value of {sec} ({money(counted[sec], cur)})."))
     for k, v in counted.items():
         a = amap.get(k, {})
-        if v <= 0 or asset_class(a.get("type")) not in NON_FINANCIAL:
+        if v <= 0 or asset_class(a.get("type")) not in VALUED_BY_ESTIMATE:
             continue
         age = months_between(a.get("valued_on"), latest["date"])
         if age is None:
@@ -420,7 +584,7 @@ def score(led):
                           "consider refreshing the estimate."))
     for a in led["assets"]:
         r = a.get("rate")
-        b = bal["assets"].get(a["name"], 0)
+        b = counted.get(a["name"], 0)
         if (a.get("liquid") and r is not None and r < 1 and spend
                 and b > spend):
             flags.append(("low_rate_cash",
@@ -434,16 +598,25 @@ def score(led):
     total = round(total)
     grade = next(g for cut, g in GRADES if total >= cut)
 
+    # Goals track one account ("bucket": its nickname) or the whole net worth
+    # ("bucket": "net_worth"). A goal may have no target yet.
     goals = []
     for g in led["goals"]:
-        cur_amt = bal["assets"].get(g.get("bucket")) if g.get("bucket") else None
-        target = g.get("target") or 0
-        goals.append({
-            "name": g.get("name"), "target": target, "by": g.get("by"),
-            "current": cur_amt,
-            "pct": round(min(cur_amt / target, 1) * 100) if cur_amt is not None
-            and target else None,
-        })
+        b = g.get("bucket")
+        if b == "net_worth":
+            cur_amt = t["net_worth"]
+        elif b:
+            cur_amt = counted.get(b)
+        else:
+            cur_amt = None
+        target = g.get("target") or None
+        pct = (round(max(min(cur_amt / target, 1), 0) * 100)
+               if cur_amt is not None and target else None)
+        entry = {"name": g.get("name"), "target": target, "by": g.get("by"),
+                 "bucket": b, "current": cur_amt, "pct": pct}
+        entry.update(goal_timeline(entry, history, series, latest["date"],
+                                   income, spend))
+        goals.append(entry)
 
     return {
         "date": latest["date"], "currency": cur,
@@ -503,23 +676,45 @@ def cmd_summary(a):
         h = s["history"][-1]
         out.append(f"Since {s['history'][-2]['date']}: "
                    f"{money(h['change'], cur)} total, of which revaluations "
-                   f"{money(h['revaluation'], cur)}; underlying "
+                   f"and FX {money(h['revaluation'], cur)}; underlying "
                    f"{money(h['underlying'], cur)}")
     amap = {a["name"]: a for a in led["assets"]}
+    bal = s["balances"]
+    if bal.get("fx"):
+        out.append("Exchange rates: " + "; ".join(
+            f"1 {k} = {money(v, cur)}" for k, v in bal["fx"].items()))
     for sec, title in (("assets", "Have"), ("debts", "Owe"),
                        ("receivables", "Owed to me")):
         items = []
-        for k, v in s["balances"][sec].items():
-            sh = amap.get(k, {}).get("share") if sec == "assets" else None
-            items.append(f"{k} {money(v, cur)}"
-                         + (f" ({sh:g}% yours)" if sh not in (None, 100)
-                            else ""))
+        for k, v in bal[sec].items():
+            a = amap.get(k, {}) if sec == "assets" else {}
+            ccy = asset_currency(led, a) if sec == "assets" else cur
+            text = f"{k} {money(v, ccy, exact=ccy != cur)}"
+            if ccy != cur:
+                text += f" (= {money(v * asset_rate(led, bal, a), cur)})"
+            sh = a.get("share")
+            if sh not in (None, 100):
+                text += f" ({sh:g}% yours)"
+            items.append(text)
         if items:
             out.append(f"{title}: " + "; ".join(items))
     for g in s["goals"]:
-        prog = (f"{g['pct']}% of" if g["pct"] is not None
-                else "not linked to a bucket; target")
-        out.append(f"Goal {g['name']}: {prog} {money(g['target'], cur)}"
+        if not g["target"]:
+            prog = "no target set yet"
+        elif g["pct"] is None:
+            prog = f"not linked to an account; target {money(g['target'], cur)}"
+        else:
+            prog = f"{g['pct']}% of {money(g['target'], cur)}"
+            if g["status"] == "reached":
+                prog += ", reached"
+            elif g["pace"] is not None:
+                prog += (f", pace {money(g['pace'], cur)}/month "
+                         f"({g['pace_basis']})")
+                if g["eta"]:
+                    prog += f", estimated {g['eta']}"
+        if g.get("needed_per_month"):
+            prog += f", needs {money(g['needed_per_month'], cur)}/month"
+        out.append(f"Goal {g['name']}: {prog}"
                    + (f" by {g['by']}" if g["by"] else ""))
     if s["flags"]:
         out.append("Flags: " + " | ".join(f["text"] for f in s["flags"]))
@@ -556,18 +751,194 @@ def cmd_checkin(a):
     for f in ("income", "spending"):
         if c.get(f) is not None:
             c[f] = num(c[f], f)
+    fx = c.get("fx") or {}
+    if not isinstance(fx, dict):
+        raise MoneyError('"fx" must look like {"USD": 63.75}.')
+    c["fx"] = {}
+    for k, v in fx.items():
+        rate = num(v, f"Exchange rate for {k}")
+        if rate <= 0:
+            raise MoneyError(f"Exchange rate for {k} must be above 0.")
+        c["fx"][str(k).upper()] = rate
     if led["checkins"] and c["date"] < led["checkins"][-1]["date"]:
         raise MoneyError(f"Date {c['date']} is before the last check-in "
                          f"({led['checkins'][-1]['date']}).")
-    entry = {k: c[k] for k in ("date", "balances", "income", "spending", "note")
-             if c.get(k) is not None}
-    if led["checkins"] and led["checkins"][-1]["date"] == c["date"]:
+    replacing = bool(led["checkins"]) and led["checkins"][-1]["date"] == c["date"]
+    if not a.confirm:
+        issues = suspicious_changes(led, c, replacing)
+        if issues:
+            raise NeedsConfirm(
+                "These changed a lot since the last check-in:\n  - "
+                + "\n  - ".join(issues)
+                + "\nAsk the user whether each is a typo. If they are all "
+                "correct, run the same command again with --confirm.")
+    entry = {k: c[k] for k in ("date", "balances", "fx", "income", "spending",
+                               "note") if c.get(k) not in (None, {})}
+    if replacing:
         led["checkins"][-1] = entry
-        print(f"Replaced check-in for {c['date']}.")
     else:
         led["checkins"].append(entry)
-        print(f"Recorded check-in for {c['date']}.")
+    # Every foreign holding needs a known rate; this raises before saving.
+    counted_assets(led, balances_through(led, len(led["checkins"]) - 1))
+    amap = {x["name"]: x for x in led["assets"]}
+    stale = sorted({asset_currency(led, amap[n])
+                    for n in c.get("balances", {}).get("assets", {})
+                    if n in amap and asset_currency(led, amap[n])
+                    != home_currency(led)} - set(c["fx"]))
     save(a.data, led)
+    print(f"{'Replaced' if replacing else 'Recorded'} check-in for {c['date']}.")
+    if stale:
+        print("Note: no new rate given for " + ", ".join(stale) + "; used the "
+              "last one. Include today's rate in \"fx\" for accuracy.")
+
+
+def suspicious_changes(led, c, replacing=False):
+    """Balances that jumped enough to look like a typo."""
+    n = len(led["checkins"]) - (2 if replacing else 1)
+    if n < 0:
+        return []
+    prev = balances_through(led, n)
+    spend = recent_monthly(led, "spending",
+                           led["profile"].get("monthly_spending")) or 0
+    amap = {x["name"]: x for x in led["assets"]}
+    dmap = {x["name"]: x for x in led["debts"]}
+    fx = dict(prev["fx"], **c.get("fx", {}))
+    out = []
+    for sec, items in c.get("balances", {}).items():
+        for name, new in items.items():
+            old = prev[sec].get(name)
+            if not old or old <= 0:
+                continue
+            if sec == "debts" and dmap.get(name, {}).get("type") == "credit_card":
+                continue  # card balances swing every billing cycle
+            rel = (new - old) / old
+            if abs(rel) < TYPO_RELATIVE:
+                continue
+            ccy, factor = home_currency(led), 1.0
+            if sec == "assets":
+                a = amap.get(name, {"name": name})
+                ccy = asset_currency(led, a)
+                try:
+                    factor = asset_rate(led, {"fx": fx}, a) * share_of(a)
+                except MoneyError:
+                    factor = 1.0
+            if abs(new - old) * factor < TYPO_SPENDING_SHARE * spend:
+                continue
+            out.append(f"{name}: {money(old, ccy)} → {money(new, ccy)} "
+                       f"({rel * 100:+.0f}%)")
+    return out
+
+
+def cmd_whatif(a):
+    """Compare the latest check-in with a hypothetical change."""
+    led = load(a.data)
+    try:
+        sc = json.loads(a.json)
+    except json.JSONDecodeError as e:
+        raise MoneyError(f"--json is not valid JSON: {e}")
+    if not led["checkins"]:
+        raise MoneyError("No check-ins yet.")
+
+    def number(key):
+        v = sc.get(key) or 0
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise MoneyError(f"{key} must be a number.")
+        return float(v)
+
+    scen = {"spending_delta": number("spending_change"),
+            "income_delta": number("income_change")}
+    now = score(led, scenario={"spending_delta": 0, "income_delta": 0})
+    alt = copy.deepcopy(led)
+    bals = alt["checkins"][-1].setdefault("balances", {})
+    cash = number("cash_change")
+    if cash:
+        alt["assets"].append({"name": "What-if cash change", "type": "cash",
+                              "liquid": True})
+        bals.setdefault("assets", {})["What-if cash change"] = cash
+    names = {d["name"] for d in alt["debts"]}
+    for i, d in enumerate(sc.get("new_debts") or [], 1):
+        name = d.get("name") or f"What-if debt {i}"
+        while name in names:
+            name += " (what-if)"
+        names.add(name)
+        alt["debts"].append({"name": name, "type": d.get("type", "other"),
+                             "rate": d.get("rate"),
+                             "monthly_payment": num(
+                                 d.get("monthly_payment", 0),
+                                 f"monthly_payment of {name}")})
+        bals.setdefault("debts", {})[name] = num(d.get("balance", 0),
+                                                 f"balance of {name}")
+    new = score(alt, scenario=scen)
+    cur = now["currency"]
+
+    def row(label, f):
+        return f"{label:<26}{f(now):>16}  →  {f(new)}"
+
+    def pct(key):
+        return lambda x: ("—" if x["metrics"].get(key) is None
+                          else f"{x['metrics'][key] * 100:.0f}%")
+
+    lines = [
+        "What-if (Momentum left out on both sides so they compare fairly)",
+        row("Grade", lambda x: f"{x['grade']} ({x['score']})"),
+        row("Net worth", lambda x: money(x["net_worth"], cur)),
+        row("Monthly income", lambda x: money(x["monthly_income"] or 0, cur)),
+        row("Monthly spending",
+            lambda x: money(x["monthly_spending"] or 0, cur)),
+        row("Emergency cushion", lambda x: (
+            "—" if x["metrics"].get("emergency_months") is None
+            else f"{x['metrics']['emergency_months']:.1f} months")),
+        row("Savings rate", pct("savings_rate")),
+        row("Debt payments / income", pct("debt_payments_to_income")),
+    ]
+    for k in ("emergency", "debt", "savings"):
+        if k in now["components"] or k in new["components"]:
+            lines.append(row(f"  {LABELS[k]} score", lambda x, k=k: str(
+                x["components"].get(k, {}).get("score", "—"))))
+    official = score(led)
+    lines.append(f"(Official grade today, with Momentum: {official['grade']} "
+                 f"({official['score']}).)")
+    print("\n".join(lines))
+    if a.as_json:
+        print(json.dumps({"now": {k: now[k] for k in ("grade", "score",
+                                                       "metrics")},
+                          "whatif": {k: new[k] for k in ("grade", "score",
+                                                         "metrics")}},
+                         indent=1))
+
+
+def cmd_backups(a):
+    bdir = backup_dir(a.data)
+    files = sorted((f for f in os.listdir(bdir)
+                    if f.startswith("ledger-") and f.endswith(".json")),
+                   reverse=True) if os.path.isdir(bdir) else []
+    if not files:
+        print("No backups yet. One is made automatically before every change.")
+        return
+    for f in files:
+        try:
+            with open(os.path.join(bdir, f), encoding="utf-8") as fh:
+                led = json.load(fh)
+            cis = led.get("checkins", [])
+            last = cis[-1]["date"] if cis else "no check-ins"
+            print(f"{f}  ·  {len(cis)} check-ins, last {last}")
+        except (OSError, ValueError, KeyError):
+            print(f"{f}  ·  unreadable")
+
+
+def cmd_restore(a):
+    bdir = backup_dir(a.data)
+    name = os.path.basename(a.file)
+    path = os.path.join(bdir, name)
+    if not os.path.exists(path):
+        raise MoneyError(f"No backup named {name}. Run `backups` to list them.")
+    with open(path, encoding="utf-8") as fh:
+        try:
+            led = json.load(fh)
+        except json.JSONDecodeError as e:
+            raise MoneyError(f"That backup is not valid JSON: {e}")
+    save(a.data, led)  # the current ledger is backed up first
+    print(f"Restored {name}. The version it replaced was backed up too.")
 
 
 def cmd_score(a):
@@ -697,6 +1068,53 @@ def trend_chart(history, cur):
             f'time">{grid}{xl}{series(vals, "tot", "Net worth")}</svg></div>')
 
 
+def cashflow_chart(led, cur):
+    """Grouped bars: income vs spending per check-in, scaled to 30 days."""
+    pts = []
+    for i, c in enumerate(led["checkins"]):
+        if c.get("income") is None or c.get("spending") is None:
+            continue
+        k = 30 / period_days(led, i)
+        pts.append((c["date"], c["income"] * k, c["spending"] * k))
+    pts = pts[-12:]
+    if not pts:
+        return ""
+    W, H, L, R, T, B = 720, 240, 64, 20, 14, 34
+    top = max(max(p[1], p[2]) for p in pts) * 1.15 or 1
+    n = len(pts)
+    gw = (W - L - R) / n
+    bw = min(26, gw * 0.3)
+
+    def y(v):
+        return T + (H - T - B) * (1 - v / top)
+
+    grid = "".join(
+        f'<line x1="{L}" x2="{W - R}" y1="{y(top * k / 4):.1f}" '
+        f'y2="{y(top * k / 4):.1f}" class="grid"/><text x="{L - 8}" '
+        f'y="{y(top * k / 4) + 4:.1f}" text-anchor="end" class="tick">'
+        f'{esc(compact(top * k / 4, cur))}</text>' for k in range(5))
+    bars = ""
+    step = max(1, (n + 5) // 6)
+    for i, (d, inc, spd) in enumerate(pts):
+        cx = L + gw * (i + 0.5)
+        for x0, v, cls, lab in ((cx - bw - 1, inc, "inc", "Income"),
+                                (cx + 1, spd, "spd", "Spending")):
+            bars += (f'<rect x="{x0:.1f}" y="{y(v):.1f}" width="{bw:.1f}" '
+                     f'height="{max(y(0) - y(v), 0):.1f}" class="{cls}">'
+                     f'<title>{esc(d)} · {lab}: {esc(money(v, cur))}</title>'
+                     f'</rect>')
+        if i % step == 0 or i == n - 1:
+            bars += (f'<text x="{cx:.1f}" y="{H - 10}" text-anchor="middle" '
+                     f'class="tick">{esc(d)}</text>')
+    return ('<h3>Income and spending</h3><div class="legend"><span><i '
+            'style="background:var(--brand)"></i>Income</span><span><i '
+            'style="background:#a7b4ac"></i>Spending</span></div>'
+            f'<div class="chartwrap"><svg class="chart" viewBox="0 0 {W} {H}" '
+            f'role="img" aria-label="Income and spending per check-in">{grid}'
+            f'{bars}</svg></div><p class="note">Scaled to a 30-day month so '
+            'biweekly and monthly check-ins compare.</p>')
+
+
 def table(headers, rows, cls="", foot=None, empty="None reported."):
     if not rows:
         return f'<p class="none">{esc(empty)}</p>'
@@ -709,7 +1127,8 @@ def table(headers, rows, cls="", foot=None, empty="None reported."):
             f'</thead><tbody>{tb}</tbody>{tf}</table></div>')
 
 
-SPECIAL = {"bnpl": "BNPL", "e_wallet": "E-wallet"}
+SPECIAL = {"bnpl": "BNPL", "e_wallet": "E-wallet",
+           "family_friend": "Family or friend"}
 
 
 def nice(t):
@@ -740,8 +1159,14 @@ def assets_table(led, bal, counted, m, total):
             liquid = (' <span class="tag" style="--c:#5b6b82">Liquid</span>'
                       if a.get("liquid") and cls_name not in NON_FINANCIAL
                       else "")
-            val = m(v) + (f"<br><small>of {m(full)} total</small>"
-                          if sh < 100 else "")
+            ccy = asset_currency(led, a)
+            val = m(v)
+            if ccy != home_currency(led):
+                val += (f"<br><small>{esc(money(full, ccy, exact=True))} at "
+                        f"{esc(money(asset_rate(led, bal, a), home_currency(led)))}"
+                        f"</small>")
+            if sh < 100:
+                val += f"<br><small>your share of {m(full * asset_rate(led, bal, a))}</small>"
             rows.append(
                 "<tr>" + "".join(f"<td>{c}</td>" for c in [
                     esc(a["name"]) + liquid, nice(a.get("type")),
@@ -774,7 +1199,7 @@ def font_face_css():
 
 def possessive(name):
     name = name.strip()
-    return name + ("’" if name[-1:].lower() == "s" else "’s")
+    return name + "’s"
 
 
 def render(led, s, message, steps):
@@ -853,7 +1278,7 @@ def render(led, s, message, steps):
         v = counted.get(a["name"], 0)
         owed = sum(bal["debts"].get(d["name"], 0) for d in led["debts"]
                    if d.get("secured_by") == a["name"])
-        if v <= 0 or (asset_class(a.get("type")) not in NON_FINANCIAL
+        if v <= 0 or (asset_class(a.get("type")) not in VALUED_BY_ESTIMATE
                       and not owed):
             continue
         eq = v - owed
@@ -888,14 +1313,39 @@ def render(led, s, message, steps):
     # Goals
     g_rows = []
     for g in s["goals"]:
-        if g["pct"] is None:
+        if not g["target"]:
+            prog = '<span class="muted">Set a target to track progress</span>'
+        elif g["pct"] is None:
             prog = '<span class="muted">Not linked to an account</span>'
         else:
             prog = (f'<div class="mini"><span style="width:{g["pct"]}%;'
                     f'background:var(--brand)"></span></div> {g["pct"]}%')
-        g_rows.append([esc(g["name"]), m(g["target"]), esc(g["by"] or "—"),
-                       m(g["current"]) if g["current"] is not None else "—",
-                       prog])
+        saved = "—" if g["current"] is None else m(g["current"]) + (
+            "<br><small>net worth</small>" if g["bucket"] == "net_worth"
+            else "")
+        target = (m(g["target"]) if g["target"] else "Not set") + (
+            f'<br><small>by {esc(g["by"])}</small>' if g["by"] else "")
+        if g["pace"] is None:
+            pace = "—"
+        else:
+            pace = m(g["pace"]) + ("<br><small>from monthly savings</small>"
+                                   if g["pace_basis"] == "monthly savings"
+                                   else "")
+        if g["status"] == "reached":
+            eta = '<span class="pos">Reached</span>'
+        elif g["eta"]:
+            eta = esc(g["eta"])
+            if g["on_track"] is True:
+                eta += '<br><small class="pos">on track</small>'
+            elif g["on_track"] is False:
+                eta += '<br><small class="neg">after target date</small>'
+        elif g["status"] in ("no_pace", "too_slow"):
+            eta = '<span class="muted">Not at current pace</span>'
+        else:
+            eta = "—"
+        if g.get("needed_per_month") and g["status"] != "reached":
+            eta += f'<br><small>needs {m(g["needed_per_month"])}/month</small>'
+        g_rows.append([esc(g["name"]), target, saved, prog, pace, eta])
 
     # Observations
     o_rows = []
@@ -999,7 +1449,7 @@ table.act td:last-child,table.obs td:last-child{{text-align:center;width:70px}}
 .mini{{display:inline-block;width:100%;min-width:80px;height:8px;
 background:#dde1e7;border-radius:2px;overflow:hidden;vertical-align:middle}}
 .mini span{{display:block;height:100%}}
-table.goals td:last-child{{text-align:left;min-width:150px}}
+table.goals td:nth-child(4){{text-align:left;min-width:130px}}
 table.goals .mini{{width:70%}}
 .tag{{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;
 border-radius:2px;color:#fff;background:var(--c);white-space:nowrap}}
@@ -1007,13 +1457,16 @@ border-radius:2px;color:#fff;background:var(--c);white-space:nowrap}}
 .muted{{color:var(--muted)}} .none{{color:var(--muted);font-style:italic;
 margin:4px 0}}
 .note{{font-size:11.5px;color:var(--muted);margin:6px 0 0}}
-.assess{{border-left:4px solid var(--brand);background:#f6f9f7;margin:0 0 12px;
-padding:10px 14px;font-size:13.5px}}
+.assess{{margin:0 0 12px;font-size:13.5px}}
 .box{{display:inline-block;width:13px;height:13px;border:1.5px solid #333}}
 .chartwrap{{overflow-x:auto;border:1px solid #2b2b2b;padding:8px 4px 0}}
 .chart{{display:block;width:100%;min-width:520px;height:auto}}
 .chart .grid{{stroke:#e1e5ea}} .chart .zero{{stroke:#888;stroke-dasharray:4 3}}
 .chart .tick{{font-size:11px;fill:var(--muted)}}
+.chart .inc{{fill:var(--brand)}} .chart .spd{{fill:#a7b4ac}}
+.legend{{display:flex;gap:18px;font-size:11.5px;color:var(--muted);margin:2px 0 6px}}
+.legend i{{display:inline-block;width:11px;height:11px;margin-right:6px;
+vertical-align:-1px}}
 .chart .line{{fill:none;stroke:var(--brand);stroke-width:2.5}}
 .chart .pt{{fill:#fff;stroke:var(--brand);stroke-width:2}}
 tr.grp td{{background:var(--grp);color:var(--brand);font-weight:700;
@@ -1089,11 +1542,13 @@ h2.bar{{break-after:avoid}} .chartwrap{{overflow:visible}}}}
 <h2 class="bar">Net Worth History</h2>
 <div class="avoid">{trend_chart(hist, cur)}</div>
 <h3>Recent check-ins</h3>
-{table(["Check-in date", "Net worth", "Change", "Of which revaluations",
+{table(["Check-in date", "Net worth", "Change", "Of which revaluations & FX",
         "Underlying change"], h_rows, cls="hist")}
 <p class="note">Revaluations are changes in the estimated value of property,
-vehicles, business interests and valuables held at both check-ins. They are
-excluded from the Momentum score.</p>
+vehicles, business interests and valuables, plus exchange-rate moves on foreign
+holdings, for things held at both check-ins. They are excluded from the
+Momentum score.</p>
+{cashflow_chart(led, cur)}
 
 <h2 class="bar">Asset Allocation</h2>
 {table(["Asset class", "Value (your share)", "Share of assets", "Allocation"],
@@ -1118,11 +1573,13 @@ excluded from the Momentum score.</p>
        empty="No receivables reported.")}
 
 <h2 class="bar">Goals</h2>
-{table(["Goal", "Target", "Target date", "Saved", "Progress"], g_rows,
-       cls="goals", empty="No goals set.")}
+{table(["Goal", "Target", "Saved", "Progress", "Pace / month", "Estimated"],
+       g_rows, cls="goals", empty="No goals set.")}
+{'<p class="note">Estimates assume your recent pace continues and leave out '
+ 'investment growth.</p>' if g_rows else ''}
 
 <footer>
- <div class="url">{esc(BRAND_NAME)} · Financial Health Report</div>
+ <div class="url">{esc(BRAND_NAME)} v{VERSION} · Financial Health Report</div>
  <p>This report was generated by {esc(BRAND_NAME)}, an open-source educational
  self-assessment tool, from information supplied by the user. It has not been
  verified by any third party and is not a credit report, credit score or
@@ -1141,6 +1598,8 @@ excluded from the Momentum score.</p>
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--version", action="version",
+                    version=f"{BRAND_NAME} {VERSION}")
     ap.add_argument("--data", default="plumb-data",
                     help="folder holding ledger.json")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1148,6 +1607,20 @@ def main(argv=None):
     sub.add_parser("summary", help="compact text of the latest state")
     p = sub.add_parser("checkin", help="append a check-in")
     p.add_argument("--json", required=True)
+    p.add_argument("--confirm", action="store_true",
+                   help="record even if some balances changed suspiciously")
+    p = sub.add_parser("whatif", help="compare today with a hypothetical "
+                                      "change, without saving anything")
+    p.add_argument("--json", required=True,
+                   help='{"spending_change": 18000, "income_change": 0, '
+                        '"cash_change": -60000, "new_debts": [{"name": ..., '
+                        '"balance": ..., "monthly_payment": ..., "rate": ...}]}')
+    p.add_argument("--as-json", action="store_true",
+                   help="also print the comparison as JSON")
+    sub.add_parser("backups", help="list automatic ledger backups")
+    p = sub.add_parser("restore", help="restore a backup (the current "
+                                       "ledger is backed up first)")
+    p.add_argument("--file", required=True, help="backup file name")
     p = sub.add_parser("score", help="grade and flags as JSON")
     p.add_argument("--history", action="store_true",
                    help="include net-worth history")
@@ -1161,7 +1634,11 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         {"init": cmd_init, "summary": cmd_summary, "checkin": cmd_checkin,
+         "whatif": cmd_whatif, "backups": cmd_backups, "restore": cmd_restore,
          "score": cmd_score, "report": cmd_report}[a.cmd](a)
+    except NeedsConfirm as e:
+        print(f"Check before saving: {e}", file=sys.stderr)
+        sys.exit(3)
     except MoneyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

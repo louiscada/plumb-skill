@@ -101,7 +101,28 @@
       "purchase_price",
       "tax_declaration"
     ],
-    "note": "Names are user-chosen nicknames and must be unique within each list. Balances live in checkins, not here: for assets, record the FULL market value; 'share' (ownership %, default 100) scales it to the user's portion. 'valued_on' is YYYY-MM. 'secured_by' names the asset a loan is secured by. Never store account, card, ID or title/lot numbers."
+    "note": "Names are user-chosen nicknames and must be unique within each list. Balances live in checkins, not here: for assets, record the FULL market value; 'share' (ownership %, default 100) scales it to the user's portion. 'valued_on' is YYYY-MM. 'currency' marks a holding kept in another currency (balance in that currency). 'secured_by' names the asset a loan is secured by. Never store account, card, ID or title/lot numbers.",
+    "goals_item_net_worth": {
+      "name": "Reach 1M net worth",
+      "target": 1000000,
+      "bucket": "net_worth"
+    },
+    "goals_item_no_target": {
+      "name": "Move out",
+      "by": "2027"
+    },
+    "assets_item_foreign": {
+      "name": "US index fund",
+      "type": "funds",
+      "liquid": false,
+      "currency": "USD"
+    },
+    "checkin_fx": {
+      "fx": {
+        "USD": 63.75
+      },
+      "note": "Home-currency value of 1 unit; needed whenever foreign holdings are reported"
+    }
   },
   "profile": {
     "name": null,

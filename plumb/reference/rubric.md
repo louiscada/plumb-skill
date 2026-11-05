@@ -21,9 +21,10 @@ The score (0–100) is a weighted average of four parts. Parts that can't be mea
 
 ## Revaluations and Momentum
 
-Real estate, vehicles, business stakes and valuables are valued by estimate, not by statement. When the estimate of something held at both check-ins changes — a new appraisal of the land, a car losing value — that change is a **revaluation**. Momentum uses the **underlying change**: the change in net worth minus revaluations. So:
+Real estate, vehicles, business stakes and valuables are valued by estimate, not by statement. Holdings in another currency also move when the exchange rate moves, even if nothing about them changed. When the estimate of something held at both check-ins changes — a new appraisal of the land, a car losing value — that change is a **revaluation**. Momentum uses the **underlying change**: the change in net worth minus revaluations. So:
 
 - A higher land estimate raises net worth but not the grade.
+- A weaker home currency raises the value of US ETFs, but that FX gain is excluded too; their price changes still count.
 - Paying down a mortgage or car loan from savings is neutral (cash down, debt down).
 - Buying or selling property is treated as a swap, not a revaluation; only any gain or loss on the sale shows up.
 

@@ -8,3 +8,6 @@ report.html
 __pycache__/
 *.pyc
 .DS_Store
+
+# Built skill package (attached to releases instead)
+dist/
