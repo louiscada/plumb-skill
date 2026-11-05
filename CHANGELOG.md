@@ -8,6 +8,7 @@ All notable changes to Plumb. Versions follow [semantic versioning](https://semv
 - Goals can track all liquid savings together (`"bucket": "liquid"`), which suits emergency and move-out funds.
 
 ### Changed
+- The Plumb wordmark in reports is now black.
 - Releases include `plumb.zip` for the Claude app's "Upload a skill" screen, next to `plumb.skill`.
 - Clearer install steps for non-technical users, including how to share Plumb with a friend.
 

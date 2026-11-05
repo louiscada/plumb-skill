@@ -1415,7 +1415,7 @@ box-shadow:0 1px 3px rgba(0,0,0,.12),0 8px 30px -12px rgba(0,0,0,.25)}}
 header.lh{{display:flex;justify-content:space-between;align-items:flex-end;
 gap:20px;padding-bottom:12px;border-bottom:1px solid var(--line)}}
 .brand{{display:flex;align-items:center;gap:12px}}
-.bname{{font:400 46px/.95 var(--display);color:var(--brand);
+.bname{{font:400 46px/.95 var(--display);color:#111;
 font-synthesis:none}}
 .bsub{{font-size:11px;color:var(--muted);letter-spacing:.06em;
 text-transform:uppercase}}
